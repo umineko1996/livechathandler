@@ -12,6 +12,7 @@ import (
 )
 
 type LiveChatHandler struct {
+	interval   int
 	videoID    string
 	liveChatID string
 	client     *youtube.Service
@@ -28,7 +29,23 @@ func (mh MessageHandlerFunc) MessageHandle(message *youtube.LiveChatMessage) err
 	return mh(message)
 }
 
-func New(videoID string) (*LiveChatHandler, error) {
+type Option interface {
+	Apply(handler *LiveChatHandler)
+}
+
+type OptionFunc func(handler *LiveChatHandler)
+
+func (of OptionFunc) Apply(handler *LiveChatHandler) {
+	of(handler)
+}
+
+func WithInterval(interval int) Option {
+	return OptionFunc(func(handler *LiveChatHandler) {
+		handler.interval = interval
+	})
+}
+
+func New(videoID string, options ...Option) (*LiveChatHandler, error) {
 	newService := func() (*youtube.Service, error) {
 		client, err := oauth2.NewClient()
 		if err != nil {
@@ -61,11 +78,18 @@ func New(videoID string) (*LiveChatHandler, error) {
 		return nil, err
 	}
 
-	return &LiveChatHandler{
+	handler := &LiveChatHandler{
+		interval:   5,
 		videoID:    videoID,
 		liveChatID: liveChatID,
 		client:     service,
-	}, nil
+	}
+
+	for _, opt := range options {
+		opt.Apply(handler)
+	}
+
+	return handler, nil
 }
 
 func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) error {
@@ -79,16 +103,16 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 
 	call := lh.client.LiveChatMessages.List(lh.liveChatID, "snippet, AuthorDetails")
 	next := resp.NextPageToken
-	delay := 5
+	defaultInterval := int64(lh.interval * 1000)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
 	// コンテキストにより中断するまでポーリング
 	for ctx.Err() == nil {
 		// ポーリング間隔調整
-		delayMs := int64(delay * 1000)
-		if resp.PollingIntervalMillis > int64(delay)*1000 {
-			delayMs = resp.PollingIntervalMillis
+		intervalMs := defaultInterval
+		if resp.PollingIntervalMillis > intervalMs {
+			intervalMs = resp.PollingIntervalMillis
 		}
 		if !timer.Stop() {
 			select {
@@ -96,7 +120,7 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 			default:
 			}
 		}
-		timer.Reset(time.Duration(delayMs) * time.Millisecond)
+		timer.Reset(time.Duration(intervalMs) * time.Millisecond)
 
 		select {
 		case <-timer.C:
