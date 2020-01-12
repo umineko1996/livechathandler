@@ -120,35 +120,43 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 
 	call := lh.client.LiveChatMessages.List(lh.liveChatID, "snippet, AuthorDetails")
 	next := resp.NextPageToken
-	defaultInterval := int64(lh.interval * 1000)
-	timer := time.NewTimer(0)
-	defer timer.Stop()
 
-	pollingInterval := func(pollingIntervalMillis int64) {
+	defaultIntervalMillis := int64(lh.interval * 1000)
+	defaultIntervalTimer := time.NewTicker(time.Duration(defaultIntervalMillis) * time.Millisecond)
+	defer defaultIntervalTimer.Stop()
+	respIntervalTimer := time.NewTimer(0)
+	defer respIntervalTimer.Stop()
+
+	waitPollingInterval := func(ctx context.Context, pollingIntervalMillis int64) {
 		// ポーリング間隔調整
-		intervalMs := defaultInterval
-		if pollingIntervalMillis > intervalMs {
-			intervalMs = pollingIntervalMillis
-		}
-		if !timer.Stop() {
+		if !respIntervalTimer.Stop() {
 			select {
-			case <-timer.C:
+			case <-respIntervalTimer.C:
 			default:
 			}
 		}
-		timer.Reset(time.Duration(intervalMs) * time.Millisecond)
+		respIntervalTimer.Reset(time.Duration(pollingIntervalMillis) * time.Millisecond)
 
 		// default do notihng
-		lh.IntervalHandle(intervalMs)
+		// MEMO( ): defaultIntervalTimerはTickerなので厳密にはこの段階から指定された秒数分待つわけではない
+		lh.IntervalHandle(max(pollingIntervalMillis, defaultIntervalMillis))
+
+		// 指定インターバルかレスポンスで指定されたインターバルの長い方でブロックする
+		// コンテキストによる中断の場合、指定インターバルの待機は中断するが、レスポンスインターバルの待機は中断されない
+		// これは、レスポンスのインターバルを守らないと最後のリクエストがエラーになってしまうためである
+		select {
+		case <-ctx.Done():
+		case <-defaultIntervalTimer.C:
+		}
 
 		select {
-		case <-timer.C:
+		case <-respIntervalTimer.C:
 		}
 	}
 
 	// コンテキストにより中断するまでポーリング
 	for ctx.Err() == nil {
-		pollingInterval(resp.PollingIntervalMillis)
+		waitPollingInterval(ctx, resp.PollingIntervalMillis)
 
 		// コメント取得
 		resp, err := call.PageToken(next).MaxResults(2000).Do()
@@ -164,4 +172,11 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 	}
 
 	return nil
+}
+
+func max(x, y int64) int64 {
+	if x > y {
+		return x
+	}
+	return y
 }
