@@ -11,29 +11,30 @@ import (
 	"github.com/umineko1996/livechathandler/internal/oauth2"
 )
 
-type LiveChatHandler struct {
-	interval   int
-	videoID    string
-	liveChatID string
-	client     *youtube.Service
-	MessageHandler
-}
+type (
+	MessageHandler interface {
+		MessageHandle(message *youtube.LiveChatMessage) error
+	}
+	MessageHandlerFunc func(message *youtube.LiveChatMessage) error
 
-type MessageHandler interface {
-	MessageHandle(message *youtube.LiveChatMessage) error
-}
+	IntervalHandler interface {
+		IntervalHandle(pollingIntervalMillis int64)
+	}
+	IntervalHandlerFunc func(pollingIntervalMillis int64)
 
-type MessageHandlerFunc func(message *youtube.LiveChatMessage) error
+	Option interface {
+		Apply(handler *LiveChatHandler)
+	}
+	OptionFunc func(handler *LiveChatHandler)
+)
 
 func (mh MessageHandlerFunc) MessageHandle(message *youtube.LiveChatMessage) error {
 	return mh(message)
 }
 
-type Option interface {
-	Apply(handler *LiveChatHandler)
+func (ih IntervalHandlerFunc) IntervalHandle(pollingIntervalMillis int64) {
+	ih(pollingIntervalMillis)
 }
-
-type OptionFunc func(handler *LiveChatHandler)
 
 func (of OptionFunc) Apply(handler *LiveChatHandler) {
 	of(handler)
@@ -43,6 +44,21 @@ func WithInterval(interval int) Option {
 	return OptionFunc(func(handler *LiveChatHandler) {
 		handler.interval = interval
 	})
+}
+
+func WithIntervalHandler(intervalHandler IntervalHandler) Option {
+	return OptionFunc(func(handler *LiveChatHandler) {
+		handler.IntervalHandler = intervalHandler
+	})
+}
+
+type LiveChatHandler struct {
+	interval   int
+	videoID    string
+	liveChatID string
+	client     *youtube.Service
+	MessageHandler
+	IntervalHandler
 }
 
 func New(videoID string, options ...Option) (*LiveChatHandler, error) {
@@ -79,10 +95,11 @@ func New(videoID string, options ...Option) (*LiveChatHandler, error) {
 	}
 
 	handler := &LiveChatHandler{
-		interval:   5,
-		videoID:    videoID,
-		liveChatID: liveChatID,
-		client:     service,
+		interval:        5,
+		videoID:         videoID,
+		liveChatID:      liveChatID,
+		client:          service,
+		IntervalHandler: IntervalHandlerFunc(func(interval int64) { return }),
 	}
 
 	for _, opt := range options {
@@ -107,12 +124,11 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
-	// コンテキストにより中断するまでポーリング
-	for ctx.Err() == nil {
+	pollingInterval := func(pollingIntervalMillis int64) {
 		// ポーリング間隔調整
 		intervalMs := defaultInterval
-		if resp.PollingIntervalMillis > intervalMs {
-			intervalMs = resp.PollingIntervalMillis
+		if pollingIntervalMillis > intervalMs {
+			intervalMs = pollingIntervalMillis
 		}
 		if !timer.Stop() {
 			select {
@@ -122,9 +138,17 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 		}
 		timer.Reset(time.Duration(intervalMs) * time.Millisecond)
 
+		// default do notihng
+		lh.IntervalHandle(intervalMs)
+
 		select {
 		case <-timer.C:
 		}
+	}
+
+	// コンテキストにより中断するまでポーリング
+	for ctx.Err() == nil {
+		pollingInterval(resp.PollingIntervalMillis)
 
 		// コメント取得
 		resp, err := call.PageToken(next).MaxResults(2000).Do()
@@ -133,7 +157,7 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 		}
 
 		for _, item := range resp.Items {
-			handler.MessageHandle(item)
+			lh.MessageHandle(item)
 		}
 
 		next = resp.NextPageToken
