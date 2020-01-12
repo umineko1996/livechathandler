@@ -13,9 +13,20 @@ import (
 
 type (
 	MessageHandler interface {
-		MessageHandle(message *youtube.LiveChatMessage) error
+		MessageHandle(message *youtube.LiveChatMessage)
 	}
-	MessageHandlerFunc func(message *youtube.LiveChatMessage) error
+	MessageHandlerFunc func(message *youtube.LiveChatMessage)
+
+	SimpleMessageHandler interface {
+		SimpleMessageHandl(messageText string)
+	}
+
+	SimpleMessageHandlerFunc func(messageText string)
+	SuperChatHandler         interface {
+		SuperChatHandle(tier int64, userName, messageText string)
+	}
+
+	SuperChatHandlerFunc func(tier int64, userName, messageText string)
 
 	IntervalHandler interface {
 		IntervalHandle(pollingIntervalMillis int64)
@@ -28,8 +39,16 @@ type (
 	OptionFunc func(handler *LiveChatHandler)
 )
 
-func (mh MessageHandlerFunc) MessageHandle(message *youtube.LiveChatMessage) error {
-	return mh(message)
+func (mh MessageHandlerFunc) MessageHandle(message *youtube.LiveChatMessage) {
+	mh(message)
+}
+
+func (sh SimpleMessageHandlerFunc) SimpleMessageHandl(messageText string) {
+	sh(messageText)
+}
+
+func (ch SuperChatHandlerFunc) SuperChatHandle(tier int64, userName, messageText string) {
+	ch(tier, userName, messageText)
 }
 
 func (ih IntervalHandlerFunc) IntervalHandle(pollingIntervalMillis int64) {
@@ -49,6 +68,24 @@ func WithInterval(interval int) Option {
 func WithIntervalHandler(intervalHandler IntervalHandler) Option {
 	return OptionFunc(func(handler *LiveChatHandler) {
 		handler.IntervalHandler = intervalHandler
+	})
+}
+
+func NewMessageHandler(simpleHnalder SimpleMessageHandler, superChatHandler SuperChatHandler) MessageHandler {
+	if simpleHnalder == nil {
+		simpleHnalder = SimpleMessageHandlerFunc(func(messageText string) { return })
+	}
+	if superChatHandler == nil {
+		superChatHandler = SuperChatHandlerFunc(func(tier int64, userName, messageText string) {
+			simpleHnalder.SimpleMessageHandl(messageText)
+		})
+	}
+	return MessageHandlerFunc(func(message *youtube.LiveChatMessage) {
+		if superChat := message.Snippet.SuperChatDetails; superChat != nil {
+			superChatHandler.SuperChatHandle(superChat.Tier, message.AuthorDetails.DisplayName, superChat.UserComment)
+			return
+		}
+		simpleHnalder.SimpleMessageHandl(message.Snippet.DisplayMessage)
 	})
 }
 
