@@ -20,14 +20,14 @@ import (
 var Localhost = "Localhost:8090"
 var CacheFile = "client_code"
 
-var ClientID = defaultClientID()
-var ClientSercret = defaultClientSercret()
+var ClientID = defaultClientID
+var ClientSercret = defaultClientSercret
 
 func NewClient() (*http.Client, error) {
 	config := &oauth2.Config{
 		RedirectURL:  "http://" + Localhost,
-		ClientID:     ClientID,
-		ClientSecret: ClientSercret,
+		ClientID:     ClientID(),
+		ClientSecret: ClientSercret(),
 		Scopes:       []string{"email", youtube.YoutubeReadonlyScope},
 		Endpoint:     google.Endpoint,
 	}
@@ -52,7 +52,7 @@ func getToken(config *oauth2.Config) (*oauth2.Token, error) {
 		return nil, err
 	}
 
-	// 失敗しても気にしない
+	// キャッシュファイルが作成できなくても今回の認証処理には関係ないため失敗しても気にしない
 	func() {
 		cache, err := json.Marshal(token)
 		if err != nil {

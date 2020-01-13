@@ -23,10 +23,10 @@ type (
 
 	SimpleMessageHandlerFunc func(messageText string)
 	SuperChatHandler         interface {
-		SuperChatHandle(tier int64, userName, messageText string)
+		SuperChatHandle(tier SuperChatTier, userName, messageText string)
 	}
 
-	SuperChatHandlerFunc func(tier int64, userName, messageText string)
+	SuperChatHandlerFunc func(tier SuperChatTier, userName, messageText string)
 
 	IntervalHandler interface {
 		IntervalHandle(pollingIntervalMillis int64)
@@ -37,6 +37,8 @@ type (
 		Apply(handler *LiveChatHandler)
 	}
 	OptionFunc func(handler *LiveChatHandler)
+
+	SuperChatTier int64
 )
 
 func (mh MessageHandlerFunc) MessageHandle(message *youtube.LiveChatMessage) {
@@ -47,7 +49,7 @@ func (sh SimpleMessageHandlerFunc) SimpleMessageHandl(messageText string) {
 	sh(messageText)
 }
 
-func (ch SuperChatHandlerFunc) SuperChatHandle(tier int64, userName, messageText string) {
+func (ch SuperChatHandlerFunc) SuperChatHandle(tier SuperChatTier, userName, messageText string) {
 	ch(tier, userName, messageText)
 }
 
@@ -76,13 +78,13 @@ func NewMessageHandler(simpleHnalder SimpleMessageHandler, superChatHandler Supe
 		simpleHnalder = SimpleMessageHandlerFunc(func(messageText string) { return })
 	}
 	if superChatHandler == nil {
-		superChatHandler = SuperChatHandlerFunc(func(tier int64, userName, messageText string) {
+		superChatHandler = SuperChatHandlerFunc(func(tier SuperChatTier, userName, messageText string) {
 			simpleHnalder.SimpleMessageHandl(messageText)
 		})
 	}
 	return MessageHandlerFunc(func(message *youtube.LiveChatMessage) {
 		if superChat := message.Snippet.SuperChatDetails; superChat != nil {
-			superChatHandler.SuperChatHandle(superChat.Tier, message.AuthorDetails.DisplayName, superChat.UserComment)
+			superChatHandler.SuperChatHandle(SuperChatTier(superChat.Tier), message.AuthorDetails.DisplayName, superChat.UserComment)
 			return
 		}
 		simpleHnalder.SimpleMessageHandl(message.Snippet.DisplayMessage)
@@ -165,7 +167,6 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 	defer respIntervalTimer.Stop()
 
 	waitPollingInterval := func(ctx context.Context, pollingIntervalMillis int64) {
-		// ポーリング間隔調整
 		if !respIntervalTimer.Stop() {
 			select {
 			case <-respIntervalTimer.C:
@@ -193,6 +194,7 @@ func (lh *LiveChatHandler) Polling(ctx context.Context, handler MessageHandler) 
 
 	// コンテキストにより中断するまでポーリング
 	for ctx.Err() == nil {
+		// ポーリング間隔調整
 		waitPollingInterval(ctx, resp.PollingIntervalMillis)
 
 		// コメント取得
