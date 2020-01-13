@@ -59,6 +59,9 @@ func run() error {
 	handler.Polling(ctx, livechathandler.NewMessageHandler(livechathandler.SimpleMessageHandlerFunc(
 		func(messageText string) {
 			fmt.Println(messageText)
+		}), livechathandler.MemberMessageHandlerFunc(
+		func(userName, messageText string) {
+			fmt.Printf("member: %s, message: %s\n", userName, messageText)
 		}), livechathandler.SuperChatHandlerFunc(
 		func(tier livechathandler.SuperChatTier, userName, messageText string) {
 			fmt.Println("superchat-----------------------------------------------------------------------")

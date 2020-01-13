@@ -18,14 +18,18 @@ type (
 	MessageHandlerFunc func(message *youtube.LiveChatMessage)
 
 	SimpleMessageHandler interface {
-		SimpleMessageHandl(messageText string)
+		SimpleMessageHandle(messageText string)
 	}
-
 	SimpleMessageHandlerFunc func(messageText string)
-	SuperChatHandler         interface {
+
+	MemberMessageHandler interface {
+		MemberMessageHandle(userName, messageText string)
+	}
+	MemberMessageHandlerFunc func(userName, messageText string)
+
+	SuperChatHandler interface {
 		SuperChatHandle(tier SuperChatTier, userName, messageText string)
 	}
-
 	SuperChatHandlerFunc func(tier SuperChatTier, userName, messageText string)
 
 	IntervalHandler interface {
@@ -41,24 +45,28 @@ type (
 	SuperChatTier int64
 )
 
-func (mh MessageHandlerFunc) MessageHandle(message *youtube.LiveChatMessage) {
-	mh(message)
+func (f MessageHandlerFunc) MessageHandle(message *youtube.LiveChatMessage) {
+	f(message)
 }
 
-func (sh SimpleMessageHandlerFunc) SimpleMessageHandl(messageText string) {
-	sh(messageText)
+func (f SimpleMessageHandlerFunc) SimpleMessageHandle(messageText string) {
+	f(messageText)
 }
 
-func (ch SuperChatHandlerFunc) SuperChatHandle(tier SuperChatTier, userName, messageText string) {
-	ch(tier, userName, messageText)
+func (f MemberMessageHandlerFunc) MemberMessageHandle(userName, messageText string) {
+	f(userName, messageText)
 }
 
-func (ih IntervalHandlerFunc) IntervalHandle(pollingIntervalMillis int64) {
-	ih(pollingIntervalMillis)
+func (f SuperChatHandlerFunc) SuperChatHandle(tier SuperChatTier, userName, messageText string) {
+	f(tier, userName, messageText)
 }
 
-func (of OptionFunc) Apply(handler *LiveChatHandler) {
-	of(handler)
+func (f IntervalHandlerFunc) IntervalHandle(pollingIntervalMillis int64) {
+	f(pollingIntervalMillis)
+}
+
+func (f OptionFunc) Apply(handler *LiveChatHandler) {
+	f(handler)
 }
 
 func WithInterval(interval int) Option {
@@ -73,21 +81,30 @@ func WithIntervalHandler(intervalHandler IntervalHandler) Option {
 	})
 }
 
-func NewMessageHandler(simpleHnalder SimpleMessageHandler, superChatHandler SuperChatHandler) MessageHandler {
-	if simpleHnalder == nil {
-		simpleHnalder = SimpleMessageHandlerFunc(func(messageText string) { return })
+func NewMessageHandler(simpleHandler SimpleMessageHandler, memberHandler MemberMessageHandler, superChatHandler SuperChatHandler) MessageHandler {
+	if simpleHandler == nil {
+		simpleHandler = SimpleMessageHandlerFunc(func(messageText string) { return })
+	}
+	if memberHandler == nil {
+		memberHandler = MemberMessageHandlerFunc(func(userName, messageText string) {
+			simpleHandler.SimpleMessageHandle(messageText)
+		})
 	}
 	if superChatHandler == nil {
 		superChatHandler = SuperChatHandlerFunc(func(tier SuperChatTier, userName, messageText string) {
-			simpleHnalder.SimpleMessageHandl(messageText)
+			simpleHandler.SimpleMessageHandle(messageText)
 		})
 	}
 	return MessageHandlerFunc(func(message *youtube.LiveChatMessage) {
-		if superChat := message.Snippet.SuperChatDetails; superChat != nil {
+		switch {
+		case message.Snippet.SuperChatDetails != nil:
+			superChat := message.Snippet.SuperChatDetails
 			superChatHandler.SuperChatHandle(SuperChatTier(superChat.Tier), message.AuthorDetails.DisplayName, superChat.UserComment)
-			return
+		case message.AuthorDetails.IsChatSponsor:
+			memberHandler.MemberMessageHandle(message.AuthorDetails.DisplayName, message.Snippet.DisplayMessage)
+		default:
+			simpleHandler.SimpleMessageHandle(message.Snippet.DisplayMessage)
 		}
-		simpleHnalder.SimpleMessageHandl(message.Snippet.DisplayMessage)
 	})
 }
 
