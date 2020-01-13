@@ -130,13 +130,13 @@ func New(videoID string, options ...Option) (*LiveChatHandler, error) {
 		return service, nil
 	}
 
-	getLiveID := func(service *youtube.Service, videoID string) (liveChatID string, err error) {
+	getLiveChatID := func(service *youtube.Service, videoID string) (liveChatID string, err error) {
 		call := service.Videos.List("liveStreamingDetails").Id(videoID)
 		resp, err := call.Do()
 		if err != nil {
-			return "", fmt.Errorf("get broadcast: %w", err)
+			return "", fmt.Errorf("get liveStreaming: %w", err)
 		} else if len(resp.Items) == 0 {
-			return "", errors.New("get broadcast: Not Found")
+			return "", errors.New("get liveStreaming: Not Found")
 		}
 		return resp.Items[0].LiveStreamingDetails.ActiveLiveChatId, nil
 	}
@@ -145,7 +145,7 @@ func New(videoID string, options ...Option) (*LiveChatHandler, error) {
 	if err != nil {
 		return nil, err
 	}
-	liveChatID, err := getLiveID(service, videoID)
+	liveChatID, err := getLiveChatID(service, videoID)
 	if err != nil {
 		return nil, err
 	}
